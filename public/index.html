@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Encriptar PDF</title>
+    <link rel="stylesheet" type="text/css" href="styles.css" />
+  </head>
+  <body>
+    <div>
+      <h1>Encriptar PDF</h1>
+      <form id="upload-form" enctype="multipart/form-data">
+        <h2>Cargar Archivo PDF</h2>
+        <input type="file" id="pdf-file" name="pdf" required=".pdf" />
+        <h2>Tipo de Encriptación</h2>
+        <label for="encryption-type-symmetric">
+          <input
+            type="radio"
+            id="encryption-type-symmetric"
+            name="encryptionType"
+            value="symmetric"
+            checked
+          />
+          Encriptación Simétrica
+        </label>
+        <label for="encryption-type-asymmetric">
+          <input
+            type="radio"
+            id="encryption-type-asymmetric"
+            name="encryptionType"
+            value="asymmetric"
+          />
+          Encriptación Asimétrica (Clave Pública RSA)
+        </label>
+        <div id="symmetric-options">
+          <label for="symmetric-password">Contraseña:</label>
+          <input
+            type="password"
+            id="symmetric-password"
+            name="password"
+            placeholder="Ingrese una contraseña"
+          />
+        </div>
+        <div id="asymmetric-options">
+          <label for="asymmetric-public-key">Clave Pública:</label>
+          <textarea
+            id="asymmetric-public-key"
+            name="publicKey"
+            placeholder="Pegue su clave pública RSA aquí"
+          ></textarea>
+        </div>
+        <button type="button" onclick="encryptPDF()">Encriptar PDF</button>
+        <button type="button" onclick="decryptPDF()">Desencriptar PDF</button>
+      </form>
+      <div id="output-message"></div>
+    </div>
+    <script src="./index.js"></script>
+  </body>
+</html>
