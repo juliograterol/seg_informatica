@@ -9,6 +9,12 @@ app.use(express.static(path.join(__dirname, "public")));
 const { PDFDocument } = require("pdf-lib");
 const crypto = require("crypto");
 const fs = require("fs");
+const { basename, extname } = require("path");
+
+// Función para generar una clave simétrica aleatoria
+function generateRandomKey() {
+  return crypto.randomBytes(32); // 256 bits (cambiar según tus necesidades)
+}
 
 app.post("/encrypt_pdf", async (req, res) => {
   try {
@@ -20,9 +26,11 @@ app.post("/encrypt_pdf", async (req, res) => {
 
     const pdfFile = req.files.pdf;
     const encryptionType = req.body.encryptionType;
-    const password = req.body.password; // La clave para encriptar
 
     if (encryptionType === "symmetric") {
+      // Encriptación simétrica
+      const password = req.body.password; // La clave para encriptar
+
       const pdfDoc = await PDFDocument.load(pdfFile.data);
       const pdfBytes = await pdfDoc.save();
 
@@ -39,20 +47,46 @@ app.post("/encrypt_pdf", async (req, res) => {
 
       res.json({ success: true, filePath: "output_symmetric.pdf" });
     } else if (encryptionType === "asymmetric") {
-      const publicKeyPEM = req.body.publicKey; // Clave pública en formato PEM
+      // Encriptación asimétrica
+      const publicKeyPath = "./keys/public_key.pem";
+      const privateKeyPath = "./keys/private_key.pem";
 
-      const pdfDoc = await PDFDocument.load(pdfFile.data);
-      const pdfBytes = await pdfDoc.save();
+      const baseFileName = basename(pdfFile.name, extname(pdfFile.name));
+      const outputFile = `${baseFileName}_encriptado.pdf`;
 
-      // Cifrar el archivo PDF con la clave pública
-      const encryptedData = crypto.publicEncrypt(publicKeyPEM, pdfBytes);
+      // Genera una clave simétrica aleatoria
+      const symmetricKey = generateRandomKey();
 
-      fs.writeFileSync(
-        path.join(__dirname, "public", "output_asymmetric.pdf"),
-        encryptedData
+      // Cifra el PDF con la clave simétrica
+      const pdfData = pdfFile.data;
+      const cipher = crypto.createCipher("aes-256-cbc", symmetricKey);
+      const encryptedPdfData = Buffer.concat([
+        cipher.update(pdfData),
+        cipher.final(),
+      ]);
+
+      // Cifra la clave simétrica con la clave pública RSA
+      const publicKey = fs.readFileSync(publicKeyPath, "utf8");
+      const encryptedSymmetricKey = crypto.publicEncrypt(
+        publicKey,
+        symmetricKey
       );
 
-      res.json({ success: true, filePath: "output_asymmetric.pdf" });
+      // Guarda el PDF cifrado y la clave simétrica cifrada
+      fs.writeFileSync(
+        path.join(__dirname, "public", outputFile),
+        encryptedPdfData
+      );
+      fs.writeFileSync(
+        path.join(__dirname, "public", `${baseFileName}_key.bin`),
+        encryptedSymmetricKey
+      );
+
+      res.json({
+        success: true,
+        filePath: outputFile,
+        keyPath: `${baseFileName}_key.bin`,
+      });
     } else {
       res.json({ success: false, message: "Tipo de encriptación no válido." });
     }
@@ -68,30 +102,30 @@ app.post("/encrypt_pdf", async (req, res) => {
 
 app.post("/decrypt_pdf", async (req, res) => {
   try {
-    const decryptionType = req.body.encryptionType;
-    const pdfFile = req.files.pdf; // Asegúrate de que el campo 'pdf' existe en la solicitud
-    const decryptionPassword = req.body.password; // La clave para desencriptar
+    const decryptionType = req.body.decryptionType;
+    const pdfFile = req.files.pdf;
+    const keyFile = req.files.key;
 
-    if (!pdfFile || !pdfFile.name.endsWith(".pdf")) {
+    if (!pdfFile || !pdfFile.name.endsWith(".pdf") || !keyFile) {
       return res.status(400).json({
         success: false,
-        message: "Por favor, proporcione un archivo PDF válido.",
+        message:
+          "Por favor, proporcione un archivo PDF válido y un archivo de clave.",
       });
     }
 
     if (decryptionType === "symmetric") {
-      const encryptedData = fs.readFileSync(
-        path.join(__dirname, "public", pdfFile.name)
-      );
+      // Desencriptación simétrica
+      const password = req.body.password; // La clave para desencriptar
 
-      const decipher = crypto.createDecipher(
+      const pdfData = fs.readFileSync(pdfFile.tempFilePath);
+      const cipher = crypto.createDecipher(
         "aes-256-cbc",
-        Buffer.from(decryptionPassword)
+        Buffer.from(password)
       );
-
       const decryptedData = Buffer.concat([
-        decipher.update(encryptedData),
-        decipher.final(),
+        cipher.update(pdfData),
+        cipher.final(),
       ]);
 
       fs.writeFileSync(
@@ -100,8 +134,40 @@ app.post("/decrypt_pdf", async (req, res) => {
       );
 
       res.json({ success: true, filePath: "output_decrypted.pdf" });
+    } else if (decryptionType === "asymmetric") {
+      // Desencriptación asimétrica
+      const privateKeyPath = "./keys/private_key.pem";
+      const publicKeyPath = "./keys/public_key.pem";
+
+      const baseFileName = basename(pdfFile.name, extname(pdfFile.name));
+      const keyData = fs.readFileSync(keyFile.tempFilePath);
+
+      // Lee la clave privada
+      const privateKey = fs.readFileSync(privateKeyPath, "utf8");
+
+      // Descifra la clave simétrica con la clave privada RSA
+      const symmetricKey = crypto.privateDecrypt(privateKey, keyData);
+
+      console.log("Symmetric Key: ", symmetricKey);
+
+      // Lee el PDF cifrado
+      const pdfData = fs.readFileSync(pdfFile.tempFilePath);
+
+      // Utiliza la clave simétrica para descifrar el PDF
+      const decipher = crypto.createDecipher("aes-256-cbc", symmetricKey);
+      const decryptedPdfData = Buffer.concat([
+        decipher.update(pdfData),
+        decipher.final(),
+      ]);
+
+      fs.writeFileSync(
+        path.join(__dirname, "public", `${baseFileName}_decrypted.pdf`),
+        decryptedPdfData
+      );
+
+      res.json({ success: true, filePath: `${baseFileName}_decrypted.pdf` });
     } else {
-      return res.status(400).json({
+      res.json({
         success: false,
         message: "Tipo de desencriptación no válido.",
       });
